@@ -4,6 +4,7 @@ from models.model import Informer, InformerStack
 
 from utils.tools import EarlyStopping, adjust_learning_rate
 from utils.metrics import metric
+from utils.mmd import MMDLoss
 
 import numpy as np
 
@@ -139,7 +140,11 @@ class Exp_Informer(Exp_Basic):
         
         model_optim = self._select_optimizer()
         criterion =  self._select_criterion()
+        
+        mmd_criterion = MMDLoss(kernel_type='rbf', kernel_mul=2.0, kernel_num=5)
 
+        prev_final_layer_features = None
+        
         if self.args.use_amp:
             scaler = torch.cuda.amp.GradScaler()
 
@@ -153,9 +158,32 @@ class Exp_Informer(Exp_Basic):
                 iter_count += 1
                 
                 model_optim.zero_grad()
-                pred, true = self._process_one_batch(
+                pred, true, final_layer_features = self._process_one_batch(
                     train_data, batch_x, batch_y, batch_x_mark, batch_y_mark)
                 loss = criterion(pred, true)
+                print("Shape of final_layer_features:", final_layer_features.shape)
+                # print("Shape of prev_final_layer_features:", prev_final_layer_features.shape)
+
+                if prev_final_layer_features is not None:
+                    # Initialize MMD loss for the current batch
+                    batch_mmd_loss = 0.0
+                    
+                    # Loop through each sample in the batch to compute MMD
+                    for j in range(len(final_layer_features) - 1):
+                        sample1 = final_layer_features[j]
+                        sample2 = final_layer_features[j + 1]
+                        
+                        mmd = mmd_criterion(sample1, sample2)
+                        batch_mmd_loss += mmd
+                    
+                    # Average MMD loss across the batch
+                    average_mmd = batch_mmd_loss / (len(final_layer_features) - 1)
+                    
+                    # Add the average MMD loss to the main loss
+                    loss += average_mmd
+                
+                prev_final_layer_features = final_layer_features.detach()  # 注意：使用 detach() 防止计算图保存
+
                 train_loss.append(loss.item())
                 
                 if (i+1) % 100==0:
@@ -274,17 +302,17 @@ class Exp_Informer(Exp_Basic):
         if self.args.use_amp:
             with torch.cuda.amp.autocast():
                 if self.args.output_attention:
-                    outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
+                    outputs, _, final_layer_features = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
                 else:
-                    outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                    outputs, final_layer_features = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
         else:
             if self.args.output_attention:
-                outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)[0]
+                outputs, _, final_layer_features = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
             else:
-                outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
+                outputs, final_layer_features = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
         if self.args.inverse:
             outputs = dataset_object.inverse_transform(outputs)
         f_dim = -1 if self.args.features=='MS' else 0
         batch_y = batch_y[:,-self.args.pred_len:,f_dim:].to(self.device)
 
-        return outputs, batch_y
+        return outputs, batch_y, final_layer_features

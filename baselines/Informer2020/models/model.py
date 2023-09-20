@@ -91,9 +91,9 @@ class Informer(nn.Module):
             dec_out = self.revin(dec_out, 'denorm')
 
         if self.output_attention:
-            return dec_out[:,-self.pred_len:,:], attns
+            return dec_out[:,-self.pred_len:,:], attns, dec_out
         else:
-            return dec_out[:,-self.pred_len:,:] # [B, L, D]
+            return dec_out[:,-self.pred_len:,:], dec_out # [B, L, D]
 
 
 class InformerStack(nn.Module):
