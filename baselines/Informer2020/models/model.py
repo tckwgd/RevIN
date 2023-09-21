@@ -9,7 +9,7 @@ from models.attn import FullAttention, ProbAttention, AttentionLayer
 from models.embed import DataEmbedding
 
 import sys
-sys.path.append('../../')
+sys.path.append('/workspace/RevIN')
 from RevIN import RevIN
 
 
