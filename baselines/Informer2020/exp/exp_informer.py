@@ -15,14 +15,14 @@ from torch.utils.data import DataLoader
 
 import os
 import time
-
+import wandb
 import warnings
 warnings.filterwarnings('ignore')
 
 class Exp_Informer(Exp_Basic):
     def __init__(self, args):
         super(Exp_Informer, self).__init__(args)
-    
+
     def _build_model(self):
         model_dict = {
             'informer':Informer,
@@ -109,8 +109,12 @@ class Exp_Informer(Exp_Basic):
         return model_optim
     
     def _select_criterion(self):
-        criterion =  nn.MSELoss()
-        return criterion
+        main_criterion = nn.MSELoss()
+        if self.args.use_MMD:
+            mmd_criterion = MMDLoss(kernel_type='rbf', kernel_mul=2.0, kernel_num=5)
+            return main_criterion, mmd_criterion
+        else:
+            return main_criterion, None
 
     def vali(self, vali_data, vali_loader, criterion):
         self.model.eval()
@@ -139,12 +143,11 @@ class Exp_Informer(Exp_Basic):
         early_stopping = EarlyStopping(patience=self.args.patience, verbose=True)
         
         model_optim = self._select_optimizer()
-        criterion =  self._select_criterion()
-        
-        mmd_criterion = MMDLoss(kernel_type='rbf', kernel_mul=2.0, kernel_num=5)
+        main_criterion, mmd_criterion = self._select_criterion()
 
         prev_final_layer_features = None
-        
+        average_mmd = 0.0
+
         if self.args.use_amp:
             scaler = torch.cuda.amp.GradScaler()
 
@@ -154,40 +157,38 @@ class Exp_Informer(Exp_Basic):
             
             self.model.train()
             epoch_time = time.time()
+
             for i, (batch_x,batch_y,batch_x_mark,batch_y_mark) in enumerate(train_loader):
+                average_mmd = 0.0
                 iter_count += 1
                 
                 model_optim.zero_grad()
                 pred, true, final_layer_features = self._process_one_batch(
                     train_data, batch_x, batch_y, batch_x_mark, batch_y_mark)
-                loss = criterion(pred, true)
-                # print("Shape of final_layer_features:", final_layer_features.shape)
-                # print("Shape of prev_final_layer_features:", prev_final_layer_features.shape)
+                mse_loss = main_criterion(pred, true)
+                total_loss = mse_loss
 
-                if prev_final_layer_features is not None:
-                    # Initialize MMD loss for the current batch
+                if mmd_criterion is not None and prev_final_layer_features is not None:
                     batch_mmd_loss = 0.0
-                    
-                    # Loop through each sample in the batch to compute MMD
                     for j in range(len(final_layer_features) - 1):
                         sample1 = final_layer_features[j]
                         sample2 = final_layer_features[j + 1]
-                        
                         mmd = mmd_criterion(sample1, sample2)
                         batch_mmd_loss += mmd
-                    
-                    # Average MMD loss across the batch
                     average_mmd = batch_mmd_loss / (len(final_layer_features) - 1)
-                    
-                    # Add the average MMD loss to the main loss
-                    loss += average_mmd
-                
-                prev_final_layer_features = final_layer_features.detach()  # 注意：使用 detach() 防止计算图保存
+                    total_loss += average_mmd
 
-                train_loss.append(loss.item())
+                prev_final_layer_features = final_layer_features.detach()
+
+                train_loss.append(total_loss.item())
                 
                 if (i+1) % 100==0:
-                    print("\titers: {0}, epoch: {1} | loss: {2:.7f}".format(i + 1, epoch + 1, loss.item()))
+                    print("\titers: {0}, epoch: {1} | loss: {2:.7f}".format(i + 1, epoch + 1, total_loss.item()))
+                    wandb.log({
+                        "Batch MSE Loss": mse_loss.item(),
+                        "Batch MMD Loss": average_mmd,
+                        "Total Batch Loss": total_loss.item()
+                    })
                     speed = (time.time()-time_now)/iter_count
                     left_time = speed*((self.args.train_epochs - epoch)*train_steps - i)
                     print('\tspeed: {:.4f}s/iter; left time: {:.4f}s'.format(speed, left_time))
@@ -195,20 +196,22 @@ class Exp_Informer(Exp_Basic):
                     time_now = time.time()
                 
                 if self.args.use_amp:
-                    scaler.scale(loss).backward()
+                    scaler.scale(total_loss).backward()
                     scaler.step(model_optim)
                     scaler.update()
                 else:
-                    loss.backward()
+                    total_loss.backward()
                     model_optim.step()
 
             print("Epoch: {} cost time: {}".format(epoch+1, time.time()-epoch_time))
             train_loss = np.average(train_loss)
-            vali_loss = self.vali(vali_data, vali_loader, criterion)
-            test_loss = self.vali(test_data, test_loader, criterion)
+            vali_loss = self.vali(vali_data, vali_loader, main_criterion)
+            test_loss = self.vali(test_data, test_loader, main_criterion)
 
             print("Epoch: {0}, Steps: {1} | Train Loss: {2:.7f} Vali Loss: {3:.7f} Test Loss: {4:.7f}".format(
                 epoch + 1, train_steps, train_loss, vali_loss, test_loss))
+            wandb.log({"Train Loss": train_loss, "Validation Loss": vali_loss, "Test Loss": test_loss})
+
             early_stopping(vali_loss, self.model, path)
             if early_stopping.early_stop:
                 print("Early stopping")
@@ -218,7 +221,7 @@ class Exp_Informer(Exp_Basic):
             
         best_model_path = path+'/'+'checkpoint.pth'
         self.model.load_state_dict(torch.load(best_model_path))
-        
+        wandb.finish()
         return self.model
 
     def test(self, setting):
@@ -249,6 +252,7 @@ class Exp_Informer(Exp_Basic):
 
         mae, mse, rmse, mape, mspe = metric(preds, trues)
         print('mse:{}, mae:{}'.format(mse, mae))
+        wandb.log({"Test MSE": mse, "Test MAE": mae})
 
         np.save(folder_path+'metrics.npy', np.array([mae, mse, rmse, mape, mspe]))
         np.save(folder_path+'pred.npy', preds)

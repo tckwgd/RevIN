@@ -1,11 +1,12 @@
 import argparse
 import os
 import torch
-
+import wandb
 from exp.exp_informer import Exp_Informer
 
 parser = argparse.ArgumentParser(description='[Informer] Long Sequences Forecasting')
 
+parser.add_argument('--use_MMD', action='store_true', default=False, help='whether to add MMD loss in training')
 parser.add_argument('--use_RevIN', action='store_true', default=False, help='Reversible Instance Normalization')
 
 parser.add_argument('--model', type=str, required=True, default='informer',help='model of experiment, options: [informer, informerstack, informerlight(TBD)]')
@@ -100,11 +101,19 @@ for ii in range(args.itr):
                 args.seq_len, args.label_len, args.pred_len,
                 args.d_model, args.n_heads, args.e_layers, args.d_layers, args.d_ff, args.attn, args.factor, 
                 args.embed, args.distil, args.mix, args.des, ii)
-
+    
+    # Initialize wandb with your project name and the current run's configuration
+    run = wandb.init(project="Feature Drift", config=args, name=setting)
+    
     exp = Exp(args) # set experiments
     print('>>>>>>>start training : {}>>>>>>>>>>>>>>>>>>>>>>>>>>'.format(setting))
-    exp.train(setting)
     
+    # Use wandb to watch your model and log the gradients and model parameters
+    wandb.watch(exp.model)
+
+    # Train and log the loss and whatever metrics you care about in your training function using wandb.log()
+    exp.train(setting)
+        
     print('>>>>>>>testing : {}<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<'.format(setting))
     exp.test(setting)
 
