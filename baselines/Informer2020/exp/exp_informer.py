@@ -221,7 +221,6 @@ class Exp_Informer(Exp_Basic):
             
         best_model_path = path+'/'+'checkpoint.pth'
         self.model.load_state_dict(torch.load(best_model_path))
-        wandb.finish()
         return self.model
 
     def test(self, setting):
