@@ -1,0 +1,25 @@
+project: 'Feature_Drift'
+name: 'Informer'
+program: main_informer.py
+method: grid
+metric:
+  goal: minimize
+  name: test_loss
+parameters:
+  use_MMD:
+    values: [False, True]
+  data:
+    values: ['ETTh1', 'ETTh2', 'ETTm1', 'ETTm2']
+  data_path:
+    values: ['ETTh1.csv', 'ETTh2.csv', 'ETTm1.csv', 'ETTm2.csv']
+  seq_len:
+    values: [48, 96, 168, 360]
+  label_len:
+    values: [48]
+  pred_len:
+    values: [24, 48, 168, 336, 720, 960]
+early_terminate:
+  type: hyperband
+  s: 2
+  eta: 3
+  max_iter: 27
