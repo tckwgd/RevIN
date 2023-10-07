@@ -1,13 +1,14 @@
 project: 'Feature_Drift'
 name: 'Informer'
-program: main_informer.py
+program: /workspace/RevIN/baselines/Informer2020/main_informer.py
 method: grid
 metric:
   goal: minimize
   name: test_loss
+
 parameters:
   use_MMD:
-    values: [False, True]
+    values: [True, False]
   data:
     values: ['ETTh1', 'ETTh2', 'ETTm1', 'ETTm2']
   data_path:
