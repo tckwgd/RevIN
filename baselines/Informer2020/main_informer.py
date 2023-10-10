@@ -8,7 +8,7 @@ from exp.exp_informer import Exp_Informer
 
 parser = argparse.ArgumentParser(description='[Informer] Long Sequences Forecasting')
 
-parser.add_argument('--use_MMD', action='store', type=bool, default=False, help='whether to add MMD loss in training')
+parser.add_argument('--use_MMD', type=str, default='False', choices=['True', 'False'], help='Whether to use MMD or not')
 parser.add_argument('--use_RevIN', action='store_true', default=False, help='Reversible Instance Normalization')
 
 parser.add_argument('--model', type=str, required=False, default='informer',help='model of experiment, options: [informer, informerstack, informerlight(TBD)]')

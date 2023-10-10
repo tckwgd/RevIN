@@ -110,7 +110,7 @@ class Exp_Informer(Exp_Basic):
     
     def _select_criterion(self):
         main_criterion = nn.MSELoss()
-        if self.args.use_MMD:
+        if self.args.use_MMD == 'True':
             mmd_criterion = MMDLoss(kernel_type='rbf', kernel_mul=2.0, kernel_num=5)
             return main_criterion, mmd_criterion
         else:
